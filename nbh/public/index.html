@@ -208,6 +208,7 @@
               <h1 id="profileName">Nea</h1>
               <p id="profileUsername">@neaspace</p>
               <span class="privacy">Community Member</span>
+              <span id="profileLikes" class="profile-likes"></span>
             </div>
 
             <div class="profile-actions" id="profileActions">
@@ -431,6 +432,18 @@
         <span></span>
       </div>
       <div id="postViewContent"></div>
+    </div>
+  </div>
+
+  <!-- ============ PEOPLE LIST MODAL (who reacted / who reposted) ============ -->
+  <div id="peopleListModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="People">
+    <div class="modal-box small">
+      <div class="modal-header">
+        <button onclick="closeModal('peopleListModal')" aria-label="Close">×</button>
+        <strong id="peopleListTitle">People</strong>
+        <span></span>
+      </div>
+      <div id="peopleListContent" class="people-list"></div>
     </div>
   </div>
 

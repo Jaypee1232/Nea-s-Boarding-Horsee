@@ -285,15 +285,72 @@ function upgradeData() {
   if (!Array.isArray(data.posts)) data.posts = [];
   if (!data.social || typeof data.social !== "object") data.social = {};
 
-  data.users.forEach(user => ensureSocialFor(user.username));
+  data.users.forEach(user => {
+    ensureSocialFor(user.username);
+    // Who has liked this member's profile picture (account-based, not per-browser).
+    if (!Array.isArray(user.likes)) user.likes = [];
+  });
 
   data.posts.forEach(post => {
-    if (!post.reactions) post.reactions = {};
+    // reactedBy tracks the reaction per ACCOUNT (username -> emoji), so
+    // everyone who logs in sees the same reactions instead of a single
+    // shared "userReaction" flag that used to leak between accounts.
+    if (!post.reactedBy || typeof post.reactedBy !== "object") {
+      post.reactedBy = {};
+    }
+    // baseReactions preserves any old anonymous seed counts (e.g. the
+    // sample post shipped with the site) that can't be attributed to a
+    // specific account. Real reactions always come from reactedBy.
+    if (!post.baseReactions || typeof post.baseReactions !== "object") {
+      post.baseReactions = (post.reactions && Object.keys(post.reactedBy).length === 0)
+        ? { ...post.reactions }
+        : {};
+    }
+    delete post.reactions;
+    delete post.userReaction;
+
+    // repostedBy is the account-based, global list of who reposted this
+    // post, so the count and "who reposted" list are the same for every
+    // member. Reconstruct it from each member's existing personal repost
+    // list so nobody's earlier reposts get lost.
+    if (!Array.isArray(post.repostedBy)) {
+      const rebuilt = [];
+      Object.entries(data.social).forEach(([username, social]) => {
+        if (social && Array.isArray(social.reposts) && social.reposts.some(r => r.postId === post.id)) {
+          rebuilt.push(username);
+        }
+      });
+      post.repostedBy = rebuilt;
+    }
+    post.shares = post.repostedBy.length;
+
     if (!Array.isArray(post.commentsList)) post.commentsList = [];
+    post.commentsList.forEach(comment => {
+      if (!comment.id) comment.id = "comment_" + Math.random().toString(36).slice(2) + Date.now();
+      if (comment.username === undefined) comment.username = null;
+    });
     if (typeof post.comments !== "number") post.comments = post.commentsList.length;
-    if (typeof post.shares !== "number") post.shares = 0;
     if (typeof post.saved !== "boolean") post.saved = false;
   });
+}
+
+/* =========================================================
+   REACTION / REPOST TOTALS (derived from reactedBy/repostedBy
+   so every member's account contributes exactly once)
+========================================================= */
+
+function reactionCounts(post) {
+  const counts = { ...(post.baseReactions || {}) };
+  Object.values(post.reactedBy || {}).forEach(emoji => {
+    counts[emoji] = (counts[emoji] || 0) + 1;
+  });
+  return counts;
+}
+
+function myReaction(post) {
+  const user = currentUser();
+  if (!user || !post.reactedBy) return null;
+  return post.reactedBy[user.username] || null;
 }
 
 /* =========================================================
@@ -501,6 +558,13 @@ function renderUser() {
   if (profileUsername) profileUsername.textContent = user.username;
   const profileBio = document.getElementById("profileBio");
   if (profileBio) profileBio.textContent = user.bio;
+  const profileLikes = document.getElementById("profileLikes");
+  if (profileLikes) {
+    const likeCount = (user.likes || []).length;
+    profileLikes.textContent = likeCount > 0
+      ? `❤ Liked by ${likeCount} member${likeCount === 1 ? "" : "s"}`
+      : "";
+  }
   const sidebarName = document.getElementById("sidebarName");
   if (sidebarName) sidebarName.textContent = user.name;
   const sidebarUsername = document.getElementById("sidebarUsername");
@@ -583,9 +647,11 @@ if (bannerInput) {
 ========================================================= */
 
 function postCardHTML(post, options = {}) {
-  const reactionButtons = REACTIONS.map(emoji => `    <button class="reaction-btn ${post.userReaction === emoji ? "active" : ""}" onclick="toggleReaction(${post.id}, '${emoji}')">
+  const counts = reactionCounts(post);
+  const myEmoji = myReaction(post);
+  const reactionButtons = REACTIONS.map(emoji => `    <button class="reaction-btn ${myEmoji === emoji ? "active" : ""}" onclick="toggleReaction(${post.id}, '${emoji}')">
       ${emoji}
-      ${post.reactions && post.reactions[emoji] ? ` ${post.reactions[emoji]}` : ""}
+      ${counts[emoji] ? ` ${counts[emoji]}` : ""}
     </button>
   `).join("");
 
@@ -640,12 +706,17 @@ function postCardHTML(post, options = {}) {
       <div class="reaction-bar">${reactionButtons}</div>
       <div class="post-actions">
         <button onclick="openComments(${post.id})"><span class="icon">${iconSVG("messageCircle")}</span> ${post.comments || 0}</button>
-        <button class="${isRepostedByCurrentUser(post.id) ? "shared" : ""}" onclick="sharePost(${post.id})"><span class="icon">${iconSVG("repeat")}</span> ${post.shares || 0}</button>
+        <button class="${isRepostedByCurrentUser(post.id) ? "shared" : ""}" onclick="sharePost(${post.id})"><span class="icon">${iconSVG("repeat")}</span> ${(post.repostedBy || []).length}</button>
         <button class="save-button" onclick="savePost(${post.id})" aria-label="${saved ? "Remove from saved" : "Save post"}"><span class="icon">${iconSVG("bookmark", { filled: saved })}</span></button>
       </div>
-      <div class="post-reactions">
+      <div class="post-reactions ${totalReactions(post) > 0 ? "clickable" : ""}" ${totalReactions(post) > 0 ? `onclick="openReactors(${post.id})" role="button" tabindex="0"` : ""}>
         ${totalReactions(post) > 0 ? `${totalReactions(post)} people reacted to this post` : "Be the first to react"}
       </div>
+      ${(post.repostedBy || []).length > 0 ? `
+        <div class="repost-line clickable" onclick="openReposters(${post.id})" role="button" tabindex="0">
+          ${iconSVG("repeat")} ${post.repostedBy.length} ${post.repostedBy.length === 1 ? "person" : "people"} reposted this
+        </div>
+      ` : ""}
     </article>
   `;
 }
@@ -667,34 +738,35 @@ function renderFeed() {
 }
 
 function totalReactions(post) {
-  if (!post.reactions) return 0;
-  return Object.values(post.reactions).reduce((total, count) => total + count, 0);
+  const counts = reactionCounts(post);
+  return Object.values(counts).reduce((total, count) => total + count, 0);
 }
 
 /* =========================================================
    REACTIONS
+   Tied to the logged-in ACCOUNT (post.reactedBy[username]),
+   not a single shared flag on the post — so each member can
+   pick any reaction and everyone correctly sees who reacted
+   with what, instead of one reaction "winning" for everybody.
 ========================================================= */
 
 function toggleReaction(id, emoji) {
   const post = data.posts.find(p => p.id === id);
   if (!post) return;
-  if (!post.reactions) post.reactions = {};
+  if (!post.reactedBy) post.reactedBy = {};
 
   const user = currentUser();
-  const wasReacting = post.userReaction === emoji;
+  if (!user) return;
 
-  if (post.userReaction === emoji) {
-    post.reactions[emoji] = Math.max(0, (post.reactions[emoji] || 0) - 1);
-    post.userReaction = null;
+  const wasReacting = post.reactedBy[user.username] === emoji;
+
+  if (wasReacting) {
+    delete post.reactedBy[user.username];
   } else {
-    if (post.userReaction) {
-      post.reactions[post.userReaction] = Math.max(0, (post.reactions[post.userReaction] || 0) - 1);
-    }
-    post.reactions[emoji] = (post.reactions[emoji] || 0) + 1;
-    post.userReaction = emoji;
+    post.reactedBy[user.username] = emoji;
   }
 
-  if (!wasReacting && user && post.username && !usernamesMatch(post.username, user.username)) {
+  if (!wasReacting && post.username && !usernamesMatch(post.username, user.username)) {
     const owner = findUser(post.username);
     if (owner) {
       notifyUser(owner.username, {
@@ -715,12 +787,76 @@ function toggleReaction(id, emoji) {
 }
 
 /* =========================================================
+   WHO REACTED / WHO REPOSTED
+   A shared "people list" popup used both for reactions and
+   reposts, so anyone can see exactly which accounts reacted
+   (and with which emoji) or reposted a given post.
+========================================================= */
+
+function openPeopleList(title, entries) {
+  const titleEl = document.getElementById("peopleListTitle");
+  if (titleEl) titleEl.textContent = title;
+  const content = document.getElementById("peopleListContent");
+  if (content) {
+    content.innerHTML = entries.length
+      ? entries.map(entry => `
+          <button type="button" class="people-list-item" onclick="closeModal('peopleListModal'); openUserProfile('${escapeHTML(entry.username)}')">
+            <div class="avatar">
+              ${entry.avatarImage ? `<img src="${escapeHTML(entry.avatarImage)}" alt="${escapeHTML(entry.name)}">` : escapeHTML(entry.avatar || avatarLetter(entry.name))}
+            </div>
+            <div class="people-list-info">
+              <strong>${escapeHTML(entry.name)}</strong>
+              ${entry.subtext ? `<small>${escapeHTML(entry.subtext)}</small>` : ""}
+            </div>
+            ${entry.emoji ? `<span class="people-list-emoji">${entry.emoji}</span>` : ""}
+          </button>
+        `).join("")
+      : `<p class="no-results">No one yet.</p>`;
+  }
+  document.getElementById("peopleListModal")?.classList.remove("hidden");
+}
+
+function openReactors(id) {
+  const post = data.posts.find(p => p.id === id);
+  if (!post) return;
+  const entries = Object.entries(post.reactedBy || {}).map(([username, emoji]) => {
+    const person = findUser(username);
+    return {
+      username,
+      name: person ? person.name : username,
+      avatar: person ? person.avatar : null,
+      avatarImage: person ? person.avatarImage : null,
+      emoji
+    };
+  });
+  openPeopleList("Reactions", entries);
+}
+
+function openReposters(id) {
+  const post = data.posts.find(p => p.id === id);
+  if (!post) return;
+  const entries = (post.repostedBy || []).map(username => {
+    const person = findUser(username);
+    return {
+      username,
+      name: person ? person.name : username,
+      avatar: person ? person.avatar : null,
+      avatarImage: person ? person.avatarImage : null,
+      subtext: "reposted this"
+    };
+  });
+  openPeopleList("Reposted by", entries);
+}
+
+/* =========================================================
    SHARE / REPOST
 ========================================================= */
 
 function isRepostedByCurrentUser(postId) {
-  const social = ensureSocial();
-  return social.reposts.some(r => r.postId === postId);
+  const user = currentUser();
+  if (!user) return false;
+  const post = data.posts.find(p => p.id === postId);
+  return !!(post && Array.isArray(post.repostedBy) && post.repostedBy.some(u => usernamesMatch(u, user.username)));
 }
 
 function sharePost(id) {
@@ -728,13 +864,15 @@ function sharePost(id) {
   if (!post) return;
   const user = currentUser();
   if (!user) return;
+  if (!Array.isArray(post.repostedBy)) post.repostedBy = [];
 
   const social = ensureSocial();
-  const alreadyReposted = social.reposts.some(r => r.postId === id);
+  const alreadyReposted = post.repostedBy.some(u => usernamesMatch(u, user.username));
 
   if (alreadyReposted) {
+    post.repostedBy = post.repostedBy.filter(u => !usernamesMatch(u, user.username));
     social.reposts = social.reposts.filter(r => r.postId !== id);
-    post.shares = Math.max(0, (post.shares || 0) - 1);
+    post.shares = post.repostedBy.length;
     saveData();
     renderFeed();
     renderProfile();
@@ -743,11 +881,12 @@ function sharePost(id) {
     return;
   }
 
+  post.repostedBy.push(user.username);
   social.reposts.unshift({
     postId: id,
     time: "Just now"
   });
-  post.shares = (post.shares || 0) + 1;
+  post.shares = post.repostedBy.length;
 
   if (post.username && !usernamesMatch(post.username, user.username)) {
     const owner = findUser(post.username);
@@ -860,7 +999,12 @@ function renderCommentsList() {
     container.innerHTML = `<p class="no-results">No comments yet. Be the first to comment!</p>`;
     return;
   }
-  container.innerHTML = list.map(comment => `
+  const user = currentUser();
+  const isAdmin = !!(user && user.isAdmin);
+  container.innerHTML = list.map(comment => {
+    const isOwner = !!(user && comment.username && usernamesMatch(comment.username, user.username));
+    const canDelete = isOwner || isAdmin;
+    return `
     <div class="comment-item">
       <div class="avatar">
         ${comment.avatarImage ? `<img src="${escapeHTML(comment.avatarImage)}" alt="${escapeHTML(comment.name)}">` : escapeHTML(comment.avatar || avatarLetter(comment.name))}
@@ -870,9 +1014,38 @@ function renderCommentsList() {
         <span>${escapeHTML(comment.text)}</span>
         <small>${escapeHTML(comment.time)}</small>
       </div>
+      ${canDelete ? `<button class="comment-delete-button" onclick="deleteComment(${post.id}, '${escapeHTML(comment.id)}')" aria-label="Delete comment">×</button>` : ""}
     </div>
-  `).join("");
+  `;
+  }).join("");
   container.scrollTop = container.scrollHeight;
+}
+
+/* =========================================================
+   DELETE COMMENT
+   The comment's own author can remove it, and the admin
+   account can remove ANY comment on ANY post — same authority
+   the admin already has over whole posts.
+========================================================= */
+
+function deleteComment(postId, commentId) {
+  const post = data.posts.find(p => p.id === postId);
+  if (!post || !Array.isArray(post.commentsList)) return;
+  const user = currentUser();
+  const comment = post.commentsList.find(c => c.id === commentId);
+  if (!comment) return;
+  const isOwner = !!(user && comment.username && usernamesMatch(comment.username, user.username));
+  const isAdmin = !!(user && user.isAdmin);
+  if (!isOwner && !isAdmin) return;
+  if (!confirm("Delete this comment?")) return;
+
+  post.commentsList = post.commentsList.filter(c => c.id !== commentId);
+  post.comments = post.commentsList.length;
+  saveData();
+  renderCommentsList();
+  renderFeed();
+  if (activePostId === postId) refreshPostView();
+  showMessage("Comment deleted.");
 }
 
 /* =========================================================
@@ -893,6 +1066,8 @@ if (commentForm) {
 
     if (!post.commentsList) post.commentsList = [];
     post.commentsList.push({
+      id: "comment_" + Math.random().toString(36).slice(2) + Date.now(),
+      username: user.username,
       name: user.name,
       avatar: user.avatar,
       avatarImage: user.avatarImage || null,
@@ -1146,10 +1321,11 @@ function publishPost() {
     avatar: user.avatar || avatarLetter(user.name),
     avatarImage: user.avatarImage || null,
     text: text || "Shared a moment ✨",
-    reactions: {},
-    userReaction: null,
+    reactedBy: {},
+    baseReactions: {},
     comments: 0,
     commentsList: [],
+    repostedBy: [],
     shares: 0,
     saved: false,
     time: "Just now"
@@ -1305,6 +1481,10 @@ function renderUserProfileModal() {
 
   const ownPosts = data.posts.filter(post => post.username && usernamesMatch(post.username, person.username));
 
+  const currentUsername = currentUser() ? currentUser().username : null;
+  const likes = Array.isArray(person.likes) ? person.likes : [];
+  const iLikeThisPfp = !!(currentUsername && likes.some(u => usernamesMatch(u, currentUsername)));
+
   content.innerHTML = `
     <div class="profile-cover" ${coverStyle}></div>
     <div class="user-profile-header">
@@ -1313,6 +1493,9 @@ function renderUserProfileModal() {
         <h2>${escapeHTML(person.name)}</h2>
         <p>${escapeHTML(person.username)}</p>
         <span class="privacy">Community Member</span>
+        <button class="avatar-like-button ${iLikeThisPfp ? "liked" : ""}" onclick="toggleAvatarLike('${escapeHTML(person.username)}')">
+          ❤ ${iLikeThisPfp ? "Liked" : "Like"} profile picture${likes.length ? ` · ${likes.length}` : ""}
+        </button>
       </div>
     </div>
     <p class="user-profile-bio">${escapeHTML(person.bio || "")}</p>
@@ -1328,6 +1511,46 @@ function renderUserProfileModal() {
       }
     </div>
   `;
+}
+
+/* =========================================================
+   LIKE A MEMBER'S PROFILE PICTURE
+   Account-based (stored on the user record itself), so it's
+   the same for everyone regardless of who's logged in. You
+   can't like your own profile picture.
+========================================================= */
+
+function toggleAvatarLike(username) {
+  const user = currentUser();
+  if (!user) return;
+  if (usernamesMatch(username, user.username)) {
+    showMessage("You can't like your own profile picture.");
+    return;
+  }
+  const person = findUser(username);
+  if (!person) return;
+  if (!Array.isArray(person.likes)) person.likes = [];
+
+  const alreadyLiked = person.likes.some(u => usernamesMatch(u, user.username));
+  if (alreadyLiked) {
+    person.likes = person.likes.filter(u => !usernamesMatch(u, user.username));
+  } else {
+    person.likes.push(user.username);
+    notifyUser(person.username, {
+      name: user.name,
+      avatar: user.avatar || avatarLetter(user.name),
+      text: "liked your profile picture",
+      time: "Just now",
+      unread: true
+    });
+  }
+
+  saveData();
+  renderUserProfileModal();
+  if (currentUser() && usernamesMatch(currentUser().username, username)) {
+    renderUser();
+  }
+  showMessage(alreadyLiked ? "Like removed." : "Profile picture liked!");
 }
 
 /* =========================================================

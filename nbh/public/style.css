@@ -819,6 +819,132 @@ textarea:focus-visible,
     font-size: 13px;
 }
 
+.post-reactions.clickable,
+.repost-line.clickable {
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-color: transparent;
+    transition: text-decoration-color .15s ease;
+}
+
+.post-reactions.clickable:hover,
+.repost-line.clickable:hover {
+    text-decoration-color: var(--muted);
+}
+
+.repost-line {
+    padding: 0 17px 15px;
+    color: var(--muted);
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* =========================================================
+   PEOPLE LIST (who reacted / who reposted a post)
+========================================================= */
+
+.people-list {
+    max-height: 55vh;
+    overflow-y: auto;
+    padding: 6px 0;
+}
+
+.people-list-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 2px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    background: transparent;
+    width: 100%;
+    text-align: left;
+}
+
+.people-list-item:last-child {
+    border-bottom: 0;
+}
+
+.people-list-item:hover strong {
+    color: var(--navy);
+}
+
+.people-list-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.people-list-info strong {
+    display: block;
+}
+
+.people-list-info small {
+    color: var(--muted);
+}
+
+.people-list-emoji {
+    font-size: 18px;
+}
+
+/* =========================================================
+   PFP LIKE BUTTON
+========================================================= */
+
+.avatar-like-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    border-radius: 20px;
+    padding: 7px 14px;
+    font-weight: 600;
+    font-size: 13.5px;
+    margin-top: 6px;
+}
+
+.avatar-like-button:hover {
+    border-color: var(--pink);
+}
+
+.avatar-like-button.liked {
+    background: var(--pink-light);
+    border-color: var(--pink);
+    color: var(--pink-text);
+}
+
+.profile-likes {
+    display: block;
+    color: var(--muted);
+    font-size: 13px;
+    margin-top: 2px;
+}
+
+/* =========================================================
+   COMMENT DELETE BUTTON
+========================================================= */
+
+.comment-item {
+    position: relative;
+}
+
+.comment-delete-button {
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font-size: 16px;
+    line-height: 1;
+    padding: 4px 6px;
+    align-self: flex-start;
+}
+
+.comment-delete-button:hover {
+    color: #d0335c;
+}
+
 /* =========================================================
    HEADERS
 ========================================================= */
