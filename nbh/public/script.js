@@ -1,5 +1,6 @@
 /* =========================================
-   NEA'S BOARDING HORSE — FRONTEND JAVASCRIPT
+   NEA'S BOARDING HORSE — FRONTEND 
+   VASCRIPT
    (Community edition — everyone is automatically
    connected, one shared feed, notifications for all)
 

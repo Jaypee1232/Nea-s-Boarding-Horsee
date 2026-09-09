@@ -64,7 +64,7 @@ if (!JWT_SECRET) {
 const SEED_MEMBERS = [
   { username: "Jaypee@nbh", password: process.env.SEED_PASSWORD_JAYPEE || "Jaypee123", name: "Jaypee", bio: "Member of Nea's Boarding Horse.", avatar: "J" },
   { username: "Nea@nbh",    password: process.env.SEED_PASSWORD_NEA    || "Nea123",    name: "Nea",    bio: "Member of Nea's Boarding Horse.", avatar: "N" },
-  { username: "Jasmine@nbh",password: process.env.SEED_PASSWORD_JASMINE|| "Jasmine123",name: "Jasmine",bio: "Member of Nea's Boarding Horse.", avatar: "J" },
+  { username: "Jasmin@nbh",password: process.env.SEED_PASSWORD_JASMINE|| "Jasmin123",name: "Jasmin",bio: "Member of Nea's Boarding Horse.", avatar: "J" },
   { username: "Joshua@nbh", password: process.env.SEED_PASSWORD_JOSHUA || "Joshua123", name: "Joshua", bio: "Member of Nea's Boarding Horse.", avatar: "J" },
   { username: "Bjay@nbh",   password: process.env.SEED_PASSWORD_BJAY   || "Bjay123",   name: "Bjay",   bio: "Member of Nea's Boarding Horse.", avatar: "B" },
   { username: "Axel@nbh",   password: process.env.SEED_PASSWORD_AXEL   || "Axel123",   name: "Axel",   bio: "Member of Nea's Boarding Horse.", avatar: "A" }
